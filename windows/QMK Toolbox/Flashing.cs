@@ -2,44 +2,47 @@
 //  Copyright © 2017 Jack Humbert. This code is licensed under MIT license (see LICENSE.md for details).
 
 using System;
-using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using System.IO.Compression;
 using System.Runtime.InteropServices;
-using System.ComponentModel;
+using System.Windows.Forms;
+using System.Threading;
+using QMK_Toolbox.Helpers;
 
-namespace QMK_Toolbox {
-
-    public enum Chipset {
-        DFU,
+namespace QMK_Toolbox
+{
+    public enum Chipset
+    {
+        Dfu,
         Halfkay,
         Caterina,
-        STM32,
+        Stm32,
         Kiibohd,
-        AVRISP,
-        USBTiny,
+        AvrIsp,
+        UsbAsp,
+        UsbTiny,
+        BootloadHid,
+        AtmelSamBa,
         NumberOfChipsets
     };
-    public class Flashing : EventArgs {
 
-        private System.Diagnostics.Process process;
-        private System.Diagnostics.ProcessStartInfo startInfo;
+    public class Flashing : EventArgs
+    {
+        private readonly Process _process;
+        private readonly ProcessStartInfo _startInfo;
 
         public const ushort UsagePage = 0xFF31;
         public const int Usage = 0x0074;
-        public string caterinaPort = "";
-        
-        private Printing printer;
-        public USB usb;
+        public string CaterinaPort = "";
 
-        string[] resources = {
+        private readonly Printing _printer;
+        public Usb Usb;
+
+        private readonly string[] _resources = {
             "dfu-programmer.exe",
             "avrdude.exe",
             "avrdude.conf",
@@ -48,192 +51,196 @@ namespace QMK_Toolbox {
             "libusb-1.0.dll",
             "libusb0.dll", // x86/libusb0_x86.dll
             "mcu-list.txt",
-            "atmega32u4_eeprom_reset.hex",
-            "dfu-prog-usb-1.2.2.zip"
+            "reset.eep",
+            "dfu-prog-usb-1.2.2.zip",
+            "bootloadHID.exe",
+            "mdloader_windows.exe",
+            "applet-flash-samd51j18a.bin"
         };
 
-        private void ExtractResource(string file) {
-            Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("QMK_Toolbox." + file);
-            byte[] bytes = new byte[(int)stream.Length];
-            stream.Read(bytes, 0, bytes.Length);
-            File.WriteAllBytes(Path.Combine(Application.LocalUserAppDataPath, file), bytes);
+        
+
+        public Flashing(Printing printer)
+        {
+            _printer = printer;
+            EmbeddedResourceHelper.ExtractResources(_resources);
+
+            _process = new Process();
+            _startInfo = new ProcessStartInfo
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                RedirectStandardInput = true,
+                CreateNoWindow = true
+            };
         }
 
-        public Flashing(Printing printer) {
-            this.printer = printer;
+        private void OnOutputDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            Debug.Write(e.Data);
+            _printer.PrintResponse(e.Data, MessageType.Info);
+        }
 
-            foreach (string resource in resources) {
-                ExtractResource(resource);
-            }
+        private void OnErrorDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            Debug.Write(e.Data);
+            _printer.PrintResponse(e.Data, MessageType.Info);
+        }
 
-            System.Management.SelectQuery query = new System.Management.SelectQuery("Win32_SystemDriver");
-            query.Condition = "Name = 'libusb0'";
-            System.Management.ManagementObjectSearcher searcher = new System.Management.ManagementObjectSearcher(query);
-            var drivers = searcher.Get();
+        private void ProcessOutput(Object streamReader)
+        {
+            StreamReader _stream = (StreamReader)streamReader;
+            var output = "";
 
-            if (drivers.Count > 0) {
-                printer.print("libusb0 driver found on system", MessageType.Info);
-            } else {
-                printer.print("libusb0 driver not found - attempting to install", MessageType.Info);
+            while (!_stream.EndOfStream)
+            {
+                output = _stream.ReadLine() + "\n";
+                _printer.PrintResponse(output, MessageType.Info);
 
-                if (Directory.Exists(Path.Combine(Application.LocalUserAppDataPath, "dfu-prog-usb-1.2.2")))
-                    Directory.Delete(Path.Combine(Application.LocalUserAppDataPath, "dfu-prog-usb-1.2.2"), true);
-                ZipFile.ExtractToDirectory(Path.Combine(Application.LocalUserAppDataPath, "dfu-prog-usb-1.2.2.zip"), Application.LocalUserAppDataPath);
-
-                int size = 0;
-                bool success = Program.SetupCopyOEMInf(Path.Combine(Application.LocalUserAppDataPath, "dfu-prog-usb-1.2.2", "atmel_usb_dfu.inf"), "", Program.OemSourceMediaType.SPOST_NONE, Program.OemCopyStyle.SP_COPY_NEWER, null, 0,
-                            ref size, null);
-                if (!success) {
-                    var errorCode = Marshal.GetLastWin32Error();
-                    var errorString = new Win32Exception(errorCode).Message;
-                    printer.print("Error: " + errorString, MessageType.Error);
+                if (output.Contains("Bootloader and code overlap.") || // DFU
+                    output.Contains("exceeds remaining flash size!") || // BootloadHID
+                    output.Contains("Not enough bytes in device info report")) // BootloadHID
+                {
+                    _printer.Print("File is too large for device", MessageType.Error);
                 }
             }
+        }
+        private void RunProcess(string command, string args)
+        {
+            _printer.Print($"{command} {args}", MessageType.Command);
+            _startInfo.WorkingDirectory = Application.LocalUserAppDataPath;
+            _startInfo.FileName = Path.Combine(Application.LocalUserAppDataPath, command);
+            _startInfo.Arguments = args;
+            _startInfo.RedirectStandardOutput = true;
+            _startInfo.RedirectStandardError = true;
+            _startInfo.UseShellExecute = false;
+            _process.StartInfo = _startInfo;
 
-            process = new System.Diagnostics.Process();
-            //process.EnableRaisingEvents = true;
-            //process.OutputDataReceived += OnOutputDataReceived;
-            //process.ErrorDataReceived += OnErrorDataReceived;
-            startInfo = new System.Diagnostics.ProcessStartInfo();
-            startInfo.UseShellExecute = false;
-            startInfo.RedirectStandardError = true;
-            startInfo.RedirectStandardOutput = true;
-            startInfo.RedirectStandardInput = true;
-            startInfo.CreateNoWindow = true;
+            _process.Start();
+
+            // Thread that handles STDOUT
+            Thread _ThreadProcessOutput = new Thread(ProcessOutput);
+            _ThreadProcessOutput.Start(_process.StandardOutput);
+
+            // Thread that handles STDERR
+            _ThreadProcessOutput = new Thread(ProcessOutput);
+            _ThreadProcessOutput.Start(_process.StandardError);
+
+            _process.WaitForExit();
         }
 
-        void OnOutputDataReceived(object sender, DataReceivedEventArgs e) {
-            Debug.Write(e.Data);
-            printer.printResponse(e.Data, MessageType.Info);
+        public string[] GetMcuList()
+        {
+            return File.ReadLines(Path.Combine(Application.LocalUserAppDataPath, "mcu-list.txt")).ToArray();
         }
 
-        void OnErrorDataReceived(object sender, DataReceivedEventArgs e) {
-            Debug.Write(e.Data);
-            printer.printResponse(e.Data, MessageType.Info);
+        public void Flash(string mcu, string file)
+        {
+            if (Usb.CanFlash(Chipset.Dfu))
+                FlashDfu(mcu, file);
+            if (Usb.CanFlash(Chipset.Caterina))
+                FlashCaterina(mcu, file);
+            if (Usb.CanFlash(Chipset.Halfkay))
+                FlashHalfkay(mcu, file);
+            if (Usb.CanFlash(Chipset.Stm32))
+                FlashStm32(mcu, file);
+            if (Usb.CanFlash(Chipset.Kiibohd))
+                FlashKiibohd(file);
+            if (Usb.CanFlash(Chipset.AvrIsp))
+                FlashAvrIsp(mcu, file);
+            if (Usb.CanFlash(Chipset.UsbAsp))
+                FlashUsbAsp(mcu, file);
+            if (Usb.CanFlash(Chipset.UsbTiny))
+                FlashUsbTiny(mcu, file);
+            if (Usb.CanFlash(Chipset.BootloadHid))
+                FlashBootloadHid(file);
+            if (Usb.CanFlash(Chipset.AtmelSamBa))
+                FlashAtmelSamBa(file);
         }
 
-        private string runProcess(string command, string args) {
-            printer.print(command + " " + args, MessageType.Command);
-            startInfo.WorkingDirectory = Application.LocalUserAppDataPath;
-            startInfo.FileName = Path.Combine(Application.LocalUserAppDataPath, command);
-            startInfo.Arguments = args;
-            process.StartInfo = startInfo;
-            string output = "";
-
-            process.Start();
-            while (!process.HasExited) {
-                char[] buffer = new char[4096];
-                while (process.StandardOutput.Peek() > -1 || process.StandardError.Peek() > -1) {
-                    if (process.StandardOutput.Peek() > -1) {
-                        var length = process.StandardOutput.Read(buffer, 0, buffer.Length);
-                        string data = new string(buffer, 0, length);
-                        output += data;
-                        printer.printResponse(data, MessageType.Info);
-                    }
-                    if (process.StandardError.Peek() > -1) {
-                        var length = process.StandardError.Read(buffer, 0, buffer.Length);
-                        string data = new string(buffer, 0, length);
-                        output += data;
-                        printer.printResponse(data, MessageType.Info);
-                    }
-                    Application.DoEvents(); // This keeps your form responsive by processing events
-                }
-
-            }
-            return output;
+        public void Reset(string mcu)
+        {
+            if (Usb.CanFlash(Chipset.Dfu))
+                ResetDfu(mcu);
+            if (Usb.CanFlash(Chipset.Halfkay))
+                ResetHalfkay(mcu);
+            if (Usb.CanFlash(Chipset.BootloadHid))
+                ResetBootloadHid();
         }
 
-        public string[] getMCUList() {
-            return File.ReadLines(Path.Combine(Application.LocalUserAppDataPath, "mcu-list.txt")).ToArray<string>();
+        public void EepromReset(string mcu)
+        {
+            if (Usb.CanFlash(Chipset.Dfu))
+                EepromResetDfu(mcu);
+            if (Usb.CanFlash(Chipset.Caterina))
+                EepromResetCaterina(mcu);
+            if (Usb.CanFlash(Chipset.UsbAsp))
+                EepromResetUsbAsp(mcu);
         }
 
-        public void flash(string mcu, string file) {
-            if (usb.canFlash(Chipset.DFU))
-                flashDFU(mcu, file);
-            if (usb.canFlash(Chipset.Caterina))
-                flashCaterina(mcu, file);
-            if (usb.canFlash(Chipset.Halfkay))
-                flashHalfkay(mcu, file);
-            if (usb.canFlash(Chipset.STM32))
-                flashSTM32(mcu, file);
-            if (usb.canFlash(Chipset.Kiibohd))
-                flashKiibohd(file);
-            if (usb.canFlash(Chipset.AVRISP))
-                flashAVRISP(mcu, file);
-            if (usb.canFlash(Chipset.USBTiny))
-                flashUSBTiny(mcu, file);
+        private void FlashDfu(string mcu, string file)
+        {
+            RunProcess("dfu-programmer.exe", $"{mcu} erase --force");
+            RunProcess("dfu-programmer.exe", $"{mcu} flash \"{file}\"");
+            RunProcess("dfu-programmer.exe", $"{mcu} reset");
         }
 
-        public void reset(string mcu) {
-            if (usb.canFlash(Chipset.DFU))
-                resetDFU(mcu);
-            if (usb.canFlash(Chipset.Halfkay))
-                resetHalfkay(mcu);
-        }
+        private void ResetDfu(string mcu) => RunProcess("dfu-programmer.exe", $"{mcu} reset");
 
-        public void eepromReset(string mcu) {
-            if (usb.canFlash(Chipset.DFU))
-                eepromResetDFU(mcu);
-            if (usb.canFlash(Chipset.Caterina))
-                eepromResetCaterina(mcu);
-        }
+        private void EepromResetDfu(string mcu) => RunProcess("dfu-programmer.exe", $"{mcu} flash --force --eeprom \"reset.eep\"");
 
-        private void flashDFU(string mcu, string file) {
-            string result;
-            result = runProcess("dfu-programmer.exe", mcu + " erase --force");
-            result = runProcess("dfu-programmer.exe", mcu + " flash \"" + file + "\"");
-            if (result.Contains("Bootloader and code overlap.")) {
-                printer.print("File is too large for device", MessageType.Error);
+        private void FlashCaterina(string mcu, string file) => RunProcess("avrdude.exe", $"-p {mcu} -c avr109 -U flash:w:\"{file}\":i -P {CaterinaPort}");
+
+        private void EepromResetCaterina(string mcu) => RunProcess("avrdude.exe", $"-p {mcu} -c avr109 -U eeprom:w:\"reset.eep\":i -P {CaterinaPort}");
+
+        private void EepromResetUsbAsp(string mcu) => RunProcess("avrdude.exe", $"-p {mcu} -c usbasp -U eeprom:w:\"reset.eep\":i -P {CaterinaPort}");
+
+        private void FlashHalfkay(string mcu, string file) => RunProcess("teensy_loader_cli.exe", $"-mmcu={mcu} \"{file}\" -v");
+
+        private void ResetHalfkay(string mcu) => RunProcess("teensy_loader_cli.exe", $"-mmcu={mcu} -bv");
+
+        private void FlashStm32(string mcu, string file)
+        {
+            if (Path.GetExtension(file)?.ToLower() == ".bin") {
+                RunProcess("dfu-util.exe", $"-a 0 -d 0483:df11 -s 0x08000000:leave -D \"{file}\"");
             } else {
-                result = runProcess("dfu-programmer.exe", mcu + " reset");
+                _printer.Print("Only firmware files in .bin format can be flashed with dfu-util!", MessageType.Error);
             }
         }
 
-        private void resetDFU(string mcu) {
-            string result = runProcess("dfu-programmer.exe", mcu + " reset");
+        private void FlashKiibohd(string file)
+        {
+            if (Path.GetExtension(file)?.ToLower() == ".bin") {
+                RunProcess("dfu-util.exe", $"-D \"{file}\"");
+            } else {
+                _printer.Print("Only firmware files in .bin format can be flashed with dfu-util!", MessageType.Error);
+            }
         }
 
-        private void eepromResetDFU(string mcu) {
-            string result;
-            string file = mcu + "_eeprom_reset.hex";
-            result = runProcess("dfu-programmer.exe", mcu + " erase --force");
-            result = runProcess("dfu-programmer.exe", mcu + " flash --eeprom \"" + file + "\"");
-            printer.print("Device has been erased - please reflash", MessageType.Bootloader);
+        private void FlashAvrIsp(string mcu, string file)
+        {
+            RunProcess("avrdude.exe", $"-p {mcu} -c avrisp -U flash:w:\"{file}\":i -P {CaterinaPort}");
+            _printer.Print("Flash complete", MessageType.Bootloader);
         }
 
-        private void flashCaterina(string mcu, string file) {
-            string result = runProcess("avrdude.exe", "-p " + mcu + " -c avr109 -U flash:w:\"" + file + "\":i -P " + caterinaPort);
+        private void FlashUsbAsp(string mcu, string file)
+        {
+            RunProcess("avrdude.exe", $"-p {mcu} -c usbasp -U flash:w:\"{file}\":i");
+            _printer.Print("Flash complete", MessageType.Bootloader);
         }
 
-        private void eepromResetCaterina(string mcu) {
-            string file = mcu + "_eeprom_reset.hex";
-            string result = runProcess("avrdude.exe", "-p " + mcu + " -c avr109 -U eeprom:w:\"" + file + "\":i -P " + caterinaPort);
+        private void FlashUsbTiny(string mcu, string file)
+        {
+            RunProcess("avrdude.exe", $"-p {mcu} -c usbtiny -U flash:w:\"{file}\":i -P {CaterinaPort}");
+            _printer.Print("Flash complete", MessageType.Bootloader);
         }
 
-        private void flashHalfkay(string mcu, string file) {
-            string result = runProcess("teensy_loader_cli.exe", "-mmcu=" + mcu + " \"" + file + "\" -v");
-        }
+        private void FlashBootloadHid(string file) => RunProcess("bootloadHID.exe", $"-r \"{file}\"");
+        private void ResetBootloadHid() => RunProcess("bootloadHID.exe", $"-r");
 
-        private void resetHalfkay(string mcu) {
-            runProcess("teensy_loader_cli.exe", "-mmcu=" + mcu + " -bv");
-        }
+        private void FlashAtmelSamBa(string file) => RunProcess("mdloader_windows.exe", $"-p {CaterinaPort} -D \"{file}\"");
 
-        private void flashSTM32(string mcu, string file) {
-            runProcess("dfu-util.exe", "-a 0 -d 0483:df11 -s 0x08000000 -D \"" + file + "\"");
-        }
-
-        private void flashKiibohd(string file) {
-            runProcess("dfu-util.exe", "-D \"" + file + "\"");
-        }
-
-        private void flashAVRISP(string mcu, string file) {
-            string result = runProcess("avrdude.exe", "-p " + mcu + " -c avrisp -U flash:w:\"" + file + "\":i -P " + caterinaPort);
-            printer.print("Flash complete", MessageType.Bootloader);
-        }
-
-        private void flashUSBTiny(string mcu, string file) {
-            string result = runProcess("avrdude.exe", "-p " + mcu + " -c usbtiny -U flash:w:\"" + file + "\":i -P " + caterinaPort);
-            printer.print("Flash complete", MessageType.Bootloader);
-        }
+        private void ResetAtmelSamBa() => RunProcess("mdloader_windows.exe", $"-p {CaterinaPort} --restart");
     }
 }

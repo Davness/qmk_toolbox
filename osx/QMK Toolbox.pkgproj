@@ -22,7 +22,7 @@
 									<key>GID</key>
 									<integer>80</integer>
 									<key>PATH</key>
-									<string>Build/Products/Release/QMK Toolbox.app</string>
+									<string>build/QMK Toolbox.app</string>
 									<key>PATH_TYPE</key>
 									<integer>1</integer>
 									<key>PERMISSIONS</key>
@@ -453,7 +453,7 @@
 				<key>OVERWRITE_PERMISSIONS</key>
 				<false/>
 				<key>VERSION</key>
-				<string>0.0.8</string>
+				<string>0.0.14</string>
 			</dict>
 			<key>UUID</key>
 			<string>9890D281-1549-46B1-8075-2C3C14A67FB9</string>

@@ -11,6 +11,7 @@
 #include "Printing.h"
 
 typedef enum {
+    AtmelSAMBA,
     DFU,
     Halfkay,
     Caterina,
@@ -20,6 +21,7 @@ typedef enum {
     Kiibohd,
     AVRISP,
     USBTiny,
+    USBAsp,
     NumberOfChipsets
 } Chipset;
 

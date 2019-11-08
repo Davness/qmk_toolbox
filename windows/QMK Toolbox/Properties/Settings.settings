@@ -6,7 +6,7 @@
       <Value Profile="(Default)" />
     </Setting>
     <Setting Name="targetSetting" Type="System.String" Scope="User">
-      <Value Profile="(Default)" />
+      <Value Profile="(Default)">atmega32u4</Value>
     </Setting>
     <Setting Name="autoSetting" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
@@ -58,6 +58,12 @@
     </Setting>
     <Setting Name="keymap" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="firstStart" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
+    <Setting Name="driversInstalled" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
     </Setting>
   </Settings>
 </SettingsFile>

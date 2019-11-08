@@ -109,7 +109,7 @@
     if ([[[filename pathExtension] lowercaseString] isEqualToString:@"qmk"] ||
     [[[filename pathExtension] lowercaseString] isEqualToString:@"hex"] ||
     [[[filename pathExtension] lowercaseString] isEqualToString:@"bin"]) {
-        [self setFilePath:[NSURL URLWithString:filename]];
+        [self setFilePath:[NSURL fileURLWithPath:filename]];
         return true;
     } else {
         return false;
@@ -124,7 +124,7 @@
 - (void)setFilePath:(NSURL *)path {
     NSString * filename = @"";
     if ([path.scheme isEqualToString:@"file"])
-        filename = [[NSString stringWithString:path.absoluteString] stringByReplacingOccurrencesOfString:@"file://" withString:@""];
+        filename = [[path.absoluteString stringByRemovingPercentEncoding] stringByReplacingOccurrencesOfString:@"file://" withString:@""];
     if ([path.scheme isEqualToString:@"qmk"]) {
         NSURL * url;
         if ([path.absoluteString containsString:@"qmk://"])
@@ -181,15 +181,17 @@
     [self loadRecentDocuments];
 
     [_printer print:@"QMK Toolbox (http://qmk.fm/toolbox)" withType:MessageType_Info];
-    [_printer printResponse:@"Supporting following bootloaders:\n" withType:MessageType_Info];
-    [_printer printResponse:@" - DFU (Atmel, LUFA) via dfu-programmer (http://dfu-programmer.github.io/)\n" withType:MessageType_Info];
+    [_printer printResponse:@"Supported bootloaders:\n" withType:MessageType_Info];
+    [_printer printResponse:@" - Atmel/LUFA/QMK DFU via dfu-programmer (http://dfu-programmer.github.io/)\n" withType:MessageType_Info];
     [_printer printResponse:@" - Caterina (Arduino, Pro Micro) via avrdude (http://nongnu.org/avrdude/)\n" withType:MessageType_Info];
-    [_printer printResponse:@" - Halfkay (Teensy, Ergodox EZ) via teensy_loader_cli (https://pjrc.com/teensy/loader_cli.html)\n" withType:MessageType_Info];
-    [_printer printResponse:@" - STM32 (ARM) via dfu-util (http://dfu-util.sourceforge.net/)\n" withType:MessageType_Info];
-    [_printer printResponse:@" - Kiibohd (ARM) via dfu-util (http://dfu-util.sourceforge.net/)\n" withType:MessageType_Info];
-    [_printer printResponse:@"And the following ISP flasher protocols:\n" withType:MessageType_Info];
+    [_printer printResponse:@" - Halfkay (Teensy, Ergodox EZ) via Teensy Loader (https://pjrc.com/teensy/loader_cli.html)\n" withType:MessageType_Info];
+    [_printer printResponse:@" - ARM DFU (STM32, Kiibohd) via dfu-util (http://dfu-util.sourceforge.net/)\n" withType:MessageType_Info];
+    [_printer printResponse:@" - Atmel SAM-BA (Massdrop) via Massdrop Loader (https://github.com/massdrop/mdloader)\n" withType:MessageType_Info];
+    [_printer printResponse:@" - BootloadHID (Atmel, PS2AVRGB) via bootloadHID (https://www.obdev.at/products/vusb/bootloadhid.html)\n" withType:MessageType_Info];
+    [_printer printResponse:@"Supported ISP flashers:\n" withType:MessageType_Info];
     [_printer printResponse:@" - USBTiny (AVR Pocket)\n" withType:MessageType_Info];
     [_printer printResponse:@" - AVRISP (Arduino ISP)\n" withType:MessageType_Info];
+    [_printer printResponse:@" - USBasp (AVR ISP)\n" withType:MessageType_Info];
     
     
 //    [_flasher runProcess:@"dfu-programmer" withArgs:@[@"--help"]];
@@ -216,13 +218,16 @@
     
     // choose whatever input identity you have decided. in this case ;
     for (NSString * str in allLinedStrings) {
-        [_mcuBox addItemWithObjectValue:str];
+        if ([str length] > 0) {
+            [self.mcuBox addItemWithObjectValue:str];
+        }
     }
-    [_mcuBox selectItemAtIndex:0];
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *lastUsedMCU = [defaults stringForKey:QMKMicrocontrollerKey];
     if (lastUsedMCU) {
         [self.mcuBox selectItemWithObjectValue:lastUsedMCU];
+    } else {
+        [self.mcuBox selectItemWithObjectValue:@"atmega32u4"];
     }
 }
 
@@ -256,12 +261,17 @@
     for (NSURL *document in recentDocuments) {
         [self.filepathBox addItemWithObjectValue:document.path];
     }
-    [self.filepathBox selectItemAtIndex:0];
+    if (self.filepathBox.numberOfItems > 0)
+        [self.filepathBox selectItemAtIndex:0];
 }
 
 - (IBAction)loadKeymapClick:(id)sender {
     NSString * keyboard = [[_keyboardBox objectValue] stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
     [self setFilePath:[NSURL URLWithString:[NSString stringWithFormat:@"qmk:http://qmk.fm/compiled/%@_default.hex", keyboard]]];
+}
+
+- (IBAction)clearButtonClick:(id)sender {
+    [[self textView] setString: @""];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)theApplication {
