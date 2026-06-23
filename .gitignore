@@ -17,7 +17,6 @@
 [Rr]eleases/
 [Xx]64/
 [Xx]86/
-!/windows/QMK Toolbox/dfu-prog-usb-1.2.2/x86
 [Bb]uild/
 bld/
 [Bb]in/
@@ -246,6 +245,7 @@ ModelManifest.xml
 .fake/
 
 # Xcode
+.DS_Store
 
 ## Build generated
 build/
@@ -260,7 +260,8 @@ DerivedData/
 !default.mode2v3
 *.perspectivev3
 !default.perspectivev3
-xcuserdata/
+xcuserdata
+!xcshareddata
 
 ## Other
 *.moved-aside
@@ -279,7 +280,7 @@ xcuserdata/
 # you should judge for yourself, the pros and cons are mentioned at:
 # https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
 #
-# Pods/
+Pods/
 
 # Carthage
 #
@@ -311,5 +312,3 @@ qmk_toolbox.exe
 qmk_toolbox_install.exe
 QMK.Toolbox.app.zip
 QMK.Toolbox.pkg
-
-qmk_toolbox
